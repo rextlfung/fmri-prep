@@ -15,22 +15,27 @@ Optionally does the following:
 
 %% Dependencies
 addpath('/home/rexfung/github/getools/matlab'); % Reading ScanArchives
+addpath('/home/rexfung/github/getools/matlab/priv'); % Reading ScanArchives
+addpath('/home/rexfung/github/getools/matlab/priv/read_mr'); % Reading ScanArchives
 addpath('/home/rexfung/github/hmriutils'); % EPI odd/even correction
 
 %% Define experiment parameters
-run('MRIsystem.m');
-run('EPIparams.m');
-run('GREparams.m');
+
+% Load in from sequence generation directory
+seqdir = ('/home/rexfung/github/rand3depi/');
+run(strcat(seqdir, 'MRIsystem.m'));
+run(strcat(seqdir, 'EPIparams.m'));
+run(strcat(seqdir, 'GREparams.m'));
 
 % Total number of time frames
-Nloops = 1; % TOPPE CV #8
+Nloops = 5; % TOPPE CV #8
 Nframes = Nloops*NframesPerLoop;
 
 % Filenames
-datdir = '/mnt/storage/rexfung/20250411fingertap/';
+datdir = '/mnt/storage/rexfung/20250506ball/';
 fn_gre = strcat(datdir, 'gre.h5');
 fn_cal = strcat(datdir, 'cal.h5');
-fn_epi = strcat(datdir, 'rest2.h5');
+fn_epi = strcat(datdir, 'epi3x.h5');
 fn_samp_log = strcat(datdir, 'samp_logs/1x.mat');
 fn_smaps = strcat(datdir, 'smaps.mat');
 
@@ -54,9 +59,9 @@ ksp_gre_raw = permute(squeeze(ksp_gre_raw),[2,4,1,3]);
 
 % discard leading empty data (first 'view' is always empty for some reason)
 % also reshapes data into [Nfid, Ncoils, ...]
-ksp_gre_raw = ksp_gre_raw(:,:,(size(ksp_gre_raw,3) + 1):end);
 ksp_cal_raw = ksp_cal_raw(:,:,(size(ksp_cal_raw,3) + 1):end);
 ksp_epi_raw = ksp_epi_raw(:,:,(size(ksp_epi_raw,3) + 1):end);
+ksp_gre_raw = ksp_gre_raw(:,:,(size(ksp_gre_raw,3) + 1):end);
 
 % discard unusual zeros in the middle of the data 
 % (currently unknown why they exist)
@@ -224,6 +229,7 @@ ksp_final = toppe.utils.ift3(img);
 img_gre_mc = toppe.utils.ift3(ksp_gre);
 img_gre = sqrt(sum(abs(img_gre_mc).^2,4));
 
+%% Viz
 interactive4D(abs(flip(permute(img, [2 1 3 4]), 1)));
 return;
 %% Viz
