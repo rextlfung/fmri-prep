@@ -14,19 +14,16 @@ Optionally does the following:
 %}
 
 %% Dependencies
-addpath('/home/rexfung/github/getools/matlab'); % Reading ScanArchives
-addpath('/home/rexfung/github/getools/matlab/priv'); % Reading ScanArchives
-addpath('/home/rexfung/github/getools/matlab/priv/read_mr'); % Reading ScanArchives
 addpath('/home/rexfung/github/orchestra'); % Reading ScanArchives
 addpath('/home/rexfung/github/hmriutils'); % EPI odd/even correction
 
 %% Define experiment parameters
 
 % Load in sequence parameters
-run('/home/rexfung/github/rand3depi/params.m');
+run('./params.m');
 
 % Total number of time frames
-Nloops = 3; % TOPPE CV #8
+Nloops = 5; % TOPPE CV #8
 Nframes = Nloops*NframesPerLoop;
 
 % Filenames
@@ -43,36 +40,27 @@ showEPIphaseDiff = true;
 doSENSE = true; % Takes a while
 SENSEmethod = 'bart';
 
+%% Load GRE data
+ksp_gre_raw = orc_read(fn_gre);
+Ncoils = size(ksp_gre_raw,2);
+
+% Check for reasonable magnitude
+fprintf('Max real part of gre data: %d\n', max(real(ksp_gre_raw(:))))
+fprintf('Max imag part of gre data: %d\n', max(imag(ksp_gre_raw(:))))
+
+% Reshape and permute gre data
+ksp_gre = ksp_gre_raw(:,:,1:Ny_gre*Nz_gre); % discard trailing data
+ksp_gre = reshape(ksp_gre,Nx_gre,Ncoils,Ny_gre,Nz_gre);
+ksp_gre = permute(ksp_gre,[1 3 4 2]); % [Nx Ny Nz Ncoils]
+
+%% Coil-compress data via PCA
+Nvcoils = 5; % Chosen based on visual inspection of the "knee" in SVs
+[ksp_gre, SVs, Vr] = ir_mri_coil_compress(ksp_gre, 'ncoil', Nvcoils);
+
 %% Load EPI data
-if useOrchestra
-    ksp_cal_raw = orc_read(fn_cal);
-    ksp_epi_raw = orc_read(fn_epi);
-
-    [Nfid, Ncoils] = size(ksp_cal_raw,1,2);
-else % Use Matteo's GE-tools
-    % Load raw data from scan archives (takes some time)
-    ksp_cal_raw = read_archive(fn_cal);
-    ksp_epi_raw = read_archive(fn_epi);
-    [Nfid, Ncoils] = size(ksp_cal_raw,2,5);
-    
-    % permute the data to be [Nfid, Ncoils, ..., ..., ...]
-    ksp_cal_raw = permute(ksp_cal_raw,[2,5,1,3,4]);
-    ksp_epi_raw = permute(ksp_epi_raw,[2,5,1,3,4]);
-    
-    % discard singleton dimensions
-    ksp_cal_raw = squeeze(ksp_cal_raw);
-    ksp_epi_raw = squeeze(ksp_epi_raw);
-    
-    % discard leading empty data (first 'view' is always empty for some reason)
-    % also reshapes data into [Nfid, Ncoils, ...]
-    ksp_cal_raw = ksp_cal_raw(:,:,2:end,:);
-    ksp_epi_raw = ksp_epi_raw(:,:,2:end,:);
-end
-
-% discard unusual zeros in the middle of the data 
-% (currently unknown why they exist)
-% non_zero_indices = (squeeze(sum(abs(ksp_epi_raw), [1 2])) ~= 0);
-% ksp_epi_raw = ksp_epi_raw(:,:,non_zero_indices);
+ksp_cal_raw = orc_read(fn_cal);
+ksp_epi_raw = orc_read(fn_epi);
+Nfid = size(ksp_epi_raw, 1);
 
 % Print max real and imag parts to check for reasonable magnitude
 fprintf('Max real part of cal data: %d\n', max(real(ksp_cal_raw(:))))
@@ -80,13 +68,18 @@ fprintf('Max imag part of cal data: %d\n', max(imag(ksp_cal_raw(:))))
 fprintf('Max real part of epi data: %d\n', max(real(ksp_epi_raw(:))))
 fprintf('Max imag part of epi data: %d\n', max(imag(ksp_epi_raw(:))))
 
+%% Coil-compress using compression matrix Vr
+ksp_cal = reshape(permute(ksp_cal_raw, [1 3 2]), [], Ncoils) * Vr;
+ksp_cal = permute(reshape(ksp_cal, Nfid, [], Nvcoils), [1 3 2]);
+ksp_epi = reshape(permute(ksp_epi_raw, [1 3 2]), [], Ncoils) * Vr;
+ksp_epi = permute(reshape(ksp_epi, Nfid, [], Nvcoils), [1 3 2]);
+
 %% Compute odd/even delays using calibration (blipless) data
 if showEPIphaseDiff
     close all;
 end
 
 % Reshape and permute calibration data (a single frame w/out blips)
-ksp_cal = ksp_cal_raw;
 ksp_cal = permute(ksp_cal,[1 3 4 2]); % [Nfid Ny Nshots Ncoils]
 ksp_cal = ksp_cal(:,1:Ny/2, :, :); % Use the first half of echoes (higher SNR)
 
@@ -118,11 +111,10 @@ fprintf('Linear term (radians/fov): %f\n', a(2));
 
 clear ksp_cal_raw;
 
-%% Grid and apply odd/even correction to loop data
+%% Grid and apply odd/even correction to EPI data
 % Reshape and permute loop data
-ksp_epi = ksp_epi_raw(:,:,1:2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz)*Nframes); % discard trailing empty data
-ksp_epi = reshape(ksp_epi,Nfid,Ncoils,2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz),Nframes);
-ksp_epi = permute(ksp_epi,[1 3 2 4]); % [Nfid Ny/Ry*Nz/Rz Ncoils Nframes]
+ksp_epi = reshape(ksp_epi,Nfid,Nvcoils,2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz),Nframes);
+ksp_epi = permute(ksp_epi,[1 3 2 4]); % [Nfid Ny/Ry*Nz/Rz Nvcoils Nframes]
 
 % Grid along kx direction via NUFFT (takes a while)
 ksp_loop_cart = zeros([Nx,size(ksp_epi,2:ndims(ksp_epi))]);
@@ -141,7 +133,7 @@ clear ksp_epi_raw ksp_epi;
 ksp_loop_cart = hmriutils.epi.epiphasecorrect(ksp_loop_cart, a);
 
 %% Create zero-filled k-space data
-ksp_epi_zf = zeros(Nx,Ny,Nz,Ncoils,Nframes);
+ksp_epi_zf = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
 load(fn_samp_log);
 
 % Replicate samp_log to the number of experiment loops
@@ -174,7 +166,7 @@ for f = 1:size(samp_log, 1)
 end
 
 %% IFFT to get multi-coil images
-imgs_mc = zeros(Nx, Ny, Nz, Ncoils, Nframes);
+imgs_mc = zeros(Nx, Ny, Nz, Nvcoils, Nframes);
 for frame = 1:Nframes
     imgs_mc(:,:,:,:,frame) = toppe.utils.ift3(ksp_epi_zf(:,:,:,:,frame));
 end
@@ -184,18 +176,6 @@ if doSENSE
     if exist(fn_smaps, 'file')
         load(fn_smaps);
     else
-        % Load GRE data
-        ksp_gre_raw = orc_read(fn_gre);
-
-        % Check for reasonable magnitude
-        fprintf('Max real part of gre data: %d\n', max(real(ksp_gre_raw(:))))
-        fprintf('Max imag part of gre data: %d\n', max(imag(ksp_gre_raw(:))))
-
-        % Reshape and permute gre data
-        ksp_gre = ksp_gre_raw(:,:,1:Ny_gre*Nz_gre); % discard trailing data
-        ksp_gre = reshape(ksp_gre,Nx_gre,Ncoils,Ny_gre,Nz_gre);
-        ksp_gre = permute(ksp_gre,[1 3 4 2]); % [Nx Ny Nz Ncoils]
-
         fprintf('Estimating sensitivity maps from GRE data via %s...\n', SENSEmethod)
     
         % Compute sensitivity maps
@@ -217,8 +197,8 @@ if doSENSE
     smaps = smaps(:,:,z_start:z_end,:);
 
     % Interpolate to match EPI data dimensions
-    smaps_new = zeros(Nx,Ny,Nz,Ncoils);
-    for coil = 1:Ncoils
+    smaps_new = zeros(Nx,Ny,Nz,Nvcoils);
+    for coil = 1:Nvcoils
         smaps_new(:,:,:,coil) = imresize3(smaps(:,:,:,coil),[Nx,Ny,Nz]);
     end
     smaps = smaps_new; clear smaps_new;
@@ -239,5 +219,5 @@ ksp_final = toppe.utils.ift3(img_final);
 
 %% Viz
 interactive4D(abs(flip(permute(img_final, [2 1 3 4]), 1)));
-interactive4D(abs(flip(permute(ksp_final, [2 1 3 4]), 1)));
+interactive4D(abs(flip(permute(log(abs(ksp_final) + eps), [2 1 3 4]), 1)));
 return;
