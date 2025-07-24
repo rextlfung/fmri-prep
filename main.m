@@ -26,12 +26,15 @@ run('./params.m');
 Nloops = 5; % TOPPE CV #8
 Nframes = Nloops*NframesPerLoop;
 
+% Coil compression params
+Nvcoils = 10; % Chosen based on visual inspection of the "knee" in SVs
+
 % Filenames
-datdir = '/mnt/storage/rexfung/20250609ball/';
-fn_cal = strcat(datdir, 'cal120.h5');
-fn_epi = strcat(datdir, '47.h5');
+datdir = '/mnt/storage/rexfung/20241017tap/';
+fn_cal = strcat(datdir, 'cal.h5');
+fn_epi = strcat(datdir, 'loop.h5');
 fn_gre = strcat(datdir, 'gre.h5');
-fn_samp_log = strcat(datdir, 'samp_logs/47.mat');
+fn_samp_log = strcat(datdir, 'samp_logs/46.mat');
 fn_smaps = strcat(datdir, 'recon/smaps.mat');
 
 % Options
@@ -54,7 +57,6 @@ ksp_gre = reshape(ksp_gre,Nx_gre,Ncoils,Ny_gre,Nz_gre);
 ksp_gre = permute(ksp_gre,[1 3 4 2]); % [Nx Ny Nz Ncoils]
 
 %% Coil-compress data via PCA
-Nvcoils = 5; % Chosen based on visual inspection of the "knee" in SVs
 [ksp_gre, SVs, Vr] = ir_mri_coil_compress(ksp_gre, 'ncoil', Nvcoils);
 
 %% Load EPI data
@@ -80,7 +82,7 @@ if showEPIphaseDiff
 end
 
 % Reshape and permute calibration data (a single frame w/out blips)
-ksp_cal = permute(ksp_cal,[1 3 4 2]); % [Nfid Ny Nshots Ncoils]
+ksp_cal = permute(ksp_cal,[1 3 2]); % [Nfid Ny*Nshots Ncoils]
 ksp_cal = ksp_cal(:,1:Ny/2, :, :); % Use the first half of echoes (higher SNR)
 
 % Estimate k-space center offset due to gradient delay using max of each echo
@@ -154,6 +156,9 @@ end
 
 clear ksp_loop_cart;
 
+%% NN-interpolation in time (view-sharing)
+ksp_epi_nn = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
+
 %% Save for next step of recon
 save(strcat(datdir,'recon/ksp.mat'),'ksp_epi_zf','-v7.3');
 
@@ -188,20 +193,20 @@ if doSENSE
     end
     
     % Mask
-    smaps = smaps_raw;
+    % smaps = smaps_raw;
     % smaps(repmat(eigmaps>8*threshold,1,1,1,32)) = 0;
 
-    % Crop in z to match EPI FoV
-    z_start = round((fov_gre(3) - fov(3))/fov_gre(3)/2*Nz_gre + 1);
-    z_end = round(Nz_gre - (fov_gre(3) - fov(3))/fov_gre(3)/2*Nz_gre);
-    smaps = smaps(:,:,z_start:z_end,:);
-
-    % Interpolate to match EPI data dimensions
-    smaps_new = zeros(Nx,Ny,Nz,Nvcoils);
-    for coil = 1:Nvcoils
-        smaps_new(:,:,:,coil) = imresize3(smaps(:,:,:,coil),[Nx,Ny,Nz]);
-    end
-    smaps = smaps_new; clear smaps_new;
+    % % Crop in z to match EPI FoV
+    % z_start = round((fov_gre(3) - fov(3))/fov_gre(3)/2*Nz_gre + 1);
+    % z_end = round(Nz_gre - (fov_gre(3) - fov(3))/fov_gre(3)/2*Nz_gre);
+    % smaps = smaps(:,:,z_start:z_end,:);
+    % 
+    % % Interpolate to match EPI data dimensions
+    % smaps_new = zeros(Nx,Ny,Nz,Nvcoils);
+    % for coil = 1:Nvcoils
+    %     smaps_new(:,:,:,coil) = imresize3(smaps(:,:,:,coil),[Nx,Ny,Nz]);
+    % end
+    % smaps = smaps_new; clear smaps_new;
 
     % Align x-direction of smaps with EPI data (sometimes necessary)
     % smaps = flip(smaps,1);
