@@ -41,10 +41,10 @@ fov = N .* res; % field of view (m)
 Nx = N(1); Ny = N(2); Nz = N(3);
 
 % Random undersampling parameters. Total acceleration = Ry*Rz*caipi_z
-Ry = sqrt(3); Rz = sqrt(3); % Acceleration/undersampling factors in each direction
+Ry = 2; Rz = 3; % Acceleration/undersampling factors in each direction
 caipi_z = 2; % Number of kz locations to acquire per shot. Must be positive integer
 R = [Ry Rz];
-acs = [0 0]; % Central portion of ky-kz space to fully sample
+acs = [0.1 0.1]; % Central portion of ky-kz space to fully sample
 max_ky_step = round(Ny/16); % Maximum gap in fast PE direction
 max_kz_step = (caipi_z - 1); % Maximum possible jump in slow PE direction
 
@@ -53,14 +53,13 @@ Nshots = ceil(length(1:caipi_z:(Nz - caipi_z + 1))/Rz); % Number of shots per vo
 
 % Decay parameters
 TE = 30e-3;                         % echo time (s)
-volumeTR = 1.6;                     % temporal frame rate (s)
+volumeTR = 0.87;                     % temporal frame rate (s)
 TR = volumeTR / Nshots;             % repetition time (s)
 T1 = 1500e-3;                       % T1 (s)
 
 % Number of frames to write in sequence, which is then looped on the scanner
-minNframesPerLoop = lcm(40,Nshots)/Nshots; % number of temporal frames to complete one RF spoil cycle
-task_period = 20; % block experiment duration
-NframesPerLoop = floor(task_period/volumeTR/minNframesPerLoop)*minNframesPerLoop;
+duration = 87; % experiment duration (s)
+Nframes = round(duration/volumeTR);
 
 % Dummy parameters
 Ndummyframes = round(3*T1/TR); % dummy frames to reach steady state for calibration

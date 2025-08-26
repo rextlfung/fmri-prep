@@ -22,29 +22,26 @@ addpath('/home/rexfung/github/hmriutils'); % EPI odd/even correction
 % Load in sequence parameters
 run('./params.m');
 
-% Total number of time frames
-Nloops = 5; % TOPPE CV #8
-Nframes = Nloops*NframesPerLoop;
-
 % Coil compression params
 Nvcoils = 10; % Chosen based on visual inspection of the "knee" in SVs
 
 % Filenames
-datdir = '/mnt/storage/rexfung/20241017tap/';
-fn_cal = strcat(datdir, 'cal.h5');
-fn_epi = strcat(datdir, 'loop.h5');
+datdir = '/mnt/storage/rexfung/20250609ball/';
+fn_cal = strcat(datdir, 'cal120.h5');
+fn_epi = strcat(datdir, '47.h5');
 fn_gre = strcat(datdir, 'gre.h5');
-fn_samp_log = strcat(datdir, 'samp_logs/46.mat');
+fn_samp_log = strcat(datdir, 'samp_logs/47.mat');
 fn_smaps = strcat(datdir, 'recon/smaps.mat');
 
 % Options
 useOrchestra = true;
 showEPIphaseDiff = true;
 doSENSE = true; % Takes a while
-SENSEmethod = 'bart';
+SENSEmethod = 'pisco';
 
 %% Load GRE data
 ksp_gre_raw = orc_read(fn_gre);
+Nfid_gre = size(ksp_gre_raw,1);
 Ncoils = size(ksp_gre_raw,2);
 
 % Check for reasonable magnitude
@@ -52,7 +49,7 @@ fprintf('Max real part of gre data: %d\n', max(real(ksp_gre_raw(:))))
 fprintf('Max imag part of gre data: %d\n', max(imag(ksp_gre_raw(:))))
 
 % Reshape and permute gre data
-ksp_gre = ksp_gre_raw(:,:,1:Ny_gre*Nz_gre); % discard trailing data
+ksp_gre = ksp_gre_raw(:,:,Nfid_gre+1:end); % discard blipless cal data
 ksp_gre = reshape(ksp_gre,Nx_gre,Ncoils,Ny_gre,Nz_gre);
 ksp_gre = permute(ksp_gre,[1 3 4 2]); % [Nx Ny Nz Ncoils]
 
@@ -139,7 +136,7 @@ ksp_epi_zf = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
 load(fn_samp_log);
 
 % Replicate samp_log to the number of experiment loops
-samp_log = repmat(samp_log, [Nloops, 1, 1]);
+samp_log = repmat(samp_log, [Nframes/size(samp_log,1), 1, 1]);
 
 % Read through log of sample locations and allocate data
 for frame = 1:Nframes
@@ -157,7 +154,7 @@ end
 clear ksp_loop_cart;
 
 %% NN-interpolation in time (view-sharing)
-ksp_epi_nn = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
+% ksp_epi_nn = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
 
 %% Save for next step of recon
 save(strcat(datdir,'recon/ksp.mat'),'ksp_epi_zf','-v7.3');
@@ -185,28 +182,38 @@ if doSENSE
     
         % Compute sensitivity maps
         tic
-            smaps_raw = makeSmaps(ksp_gre, SENSEmethod);
+            [smaps_raw, emaps] = makeSmaps(ksp_gre, SENSEmethod);
         toc
 
         % Save for next time
-        save(fn_smaps, 'smaps_raw', '-v7.3');
+        save(fn_smaps, 'smaps_raw', 'emaps', '-v7.3');
     end
-    
-    % Mask
-    % smaps = smaps_raw;
-    % smaps(repmat(eigmaps>8*threshold,1,1,1,32)) = 0;
+end
 
-    % % Crop in z to match EPI FoV
-    % z_start = round((fov_gre(3) - fov(3))/fov_gre(3)/2*Nz_gre + 1);
-    % z_end = round(Nz_gre - (fov_gre(3) - fov(3))/fov_gre(3)/2*Nz_gre);
-    % smaps = smaps(:,:,z_start:z_end,:);
-    % 
-    % % Interpolate to match EPI data dimensions
-    % smaps_new = zeros(Nx,Ny,Nz,Nvcoils);
-    % for coil = 1:Nvcoils
-    %     smaps_new(:,:,:,coil) = imresize3(smaps(:,:,:,coil),[Nx,Ny,Nz]);
-    % end
-    % smaps = smaps_new; clear smaps_new;
+%% Mask and resize sensitivity maps
+if doSENSE
+    smaps = smaps_raw;
+    
+    % Support mask created from the last eigenvalues of the G matrices 
+    threshold_mask = 0.5;
+    eig_mask = zeros(Nx_gre, Ny_gre, Nz_gre);
+    eig_mask(find(emaps(:,:,:,end) < threshold_mask)) = 1;    
+    smaps = smaps .* eig_mask;
+end
+
+%% Crop and resize to match EPI images
+if doSENSE
+    % Crop in z to match EPI FoV
+    z_start = round((fov_gre(3) - fov(3))/fov_gre(3)/2*Nz_gre + 1);
+    z_end = round(Nz_gre - (fov_gre(3) - fov(3))/fov_gre(3)/2*Nz_gre);
+    smaps = smaps(:,:,z_start:z_end,:);
+
+    % Interpolate to match EPI data dimensions
+    smaps_new = zeros(Nx,Ny,Nz,Nvcoils);
+    for coil = 1:Nvcoils
+        smaps_new(:,:,:,coil) = imresize3(smaps(:,:,:,coil),[Nx,Ny,Nz]);
+    end
+    smaps = smaps_new; clear smaps_new;
 
     % Align x-direction of smaps with EPI data (sometimes necessary)
     % smaps = flip(smaps,1);
