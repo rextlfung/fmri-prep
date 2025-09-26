@@ -26,11 +26,11 @@ run('./params.m');
 Nvcoils = 10; % Chosen based on visual inspection of the "knee" in SVs
 
 % Filenames
-datdir = '/mnt/storage/rexfung/20250609ball/';
-fn_cal = strcat(datdir, 'cal120.h5');
-fn_epi = strcat(datdir, '47.h5');
-fn_gre = strcat(datdir, 'gre.h5');
-fn_samp_log = strcat(datdir, 'samp_logs/47.mat');
+datdir = '/mnt/storage/rexfung/20250926ball/';
+fn_gre = strcat(datdir, 'exam/gre.h5');
+fn_cal = strcat(datdir, 'exam/cal90.h5');
+fn_epi = strcat(datdir, 'exam/epi6x.h5');
+fn_samp_log = strcat(datdir, 'samp_logs/epi6x.mat');
 fn_smaps = strcat(datdir, 'recon/smaps.mat');
 
 % Options
@@ -73,21 +73,19 @@ ksp_cal = permute(reshape(ksp_cal, Nfid, [], Nvcoils), [1 3 2]);
 ksp_epi = reshape(permute(ksp_epi_raw, [1 3 2]), [], Ncoils) * Vr;
 ksp_epi = permute(reshape(ksp_epi, Nfid, [], Nvcoils), [1 3 2]);
 
-%% Compute odd/even delays using calibration (blipless) data
-if showEPIphaseDiff
-    close all;
-end
+clear ksp_epi_raw;
 
-% Reshape and permute calibration data (a single frame w/out blips)
+%% Reshape and permute calibration data (a single frame w/out blips)
 ksp_cal = permute(ksp_cal,[1 3 2]); % [Nfid Ny*Nshots Ncoils]
 ksp_cal = ksp_cal(:,1:Ny/2, :, :); % Use the first half of echoes (higher SNR)
 
+%% Compute odd/even delays using calibration (blipless) data
 % Estimate k-space center offset due to gradient delay using max of each echo
 % train
 cal_data = squeeze(abs(mean(ksp_cal, 3)));
 cal_data(:,1:2:end,:,:) = flip(cal_data(:,1:2:end,:,:),1);
 [M, I] = max(cal_data,[],1);
-delay = Nfid/2 - mean(I,'all');
+delay = mean(I,'all') - Nfid/2;
 fprintf('Estimated offset from center of k-space (samples): %f\n', delay);
 
 % retrieve sample locations from .mod file with adc info
@@ -96,6 +94,8 @@ fprintf('Estimated offset from center of k-space (samples): %f\n', delay);
 % [kxo, kxe] = toppe.utils.getk(sysGE, fn_adc, Nfid, delay);
 load(strcat(datdir, sprintf('oe_locs/kxoe%d.mat', Nx)),'kxo', 'kxe');
 kxo = kxo/100; kxe = kxe/100; % convert to cycles/cm
+kxo = interp1(1:Nfid, kxo, (1:Nfid) - 0.5 - delay, 'linear', 'extrap');
+kxe = interp1(1:Nfid, kxe, (1:Nfid) - 0.5 - delay, 'linear', 'extrap');
 
 % Extract even number of lines (in case ETL is odd)
 ETL_even = size(ksp_cal,2) - mod(size(ksp_cal,2),2);
@@ -126,7 +126,7 @@ tic
     end
 toc
 
-clear ksp_epi_raw ksp_epi;
+clear ksp_epi;
 
 % Phase correct along kx direction
 ksp_loop_cart = hmriutils.epi.epiphasecorrect(ksp_loop_cart, a);

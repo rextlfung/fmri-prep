@@ -35,16 +35,16 @@ dwell = 4e-6; % s
 %% Scan parameters for echo-planar imaging (EPI) sequence
 
 % Spatial parameters
-res = [1.8 1.8 1.8]*1e-3; % resolution (m)
-N = [120 120 80]; % acquisition tensor size
+res = [2.4 2.4 2.4]*1e-3; % resolution (m)
+N = [90 90 60]; % acquisition tensor size
 fov = N .* res; % field of view (m)
 Nx = N(1); Ny = N(2); Nz = N(3);
 
 % Random undersampling parameters. Total acceleration = Ry*Rz*caipi_z
-Ry = 2; Rz = 3; % Acceleration/undersampling factors in each direction
-caipi_z = 2; % Number of kz locations to acquire per shot. Must be positive integer
+Ry = 1; Rz = 6/4; % Acceleration/undersampling factors in each direction
+caipi_z = 4; % Number of kz locations to acquire per shot. Must be positive integer.
 R = [Ry Rz];
-acs = [0.1 0.1]; % Central portion of ky-kz space to fully sample
+acs = [0.0 0.01]; % Central portion of ky-kz space to fully sample
 max_ky_step = round(Ny/16); % Maximum gap in fast PE direction
 max_kz_step = (caipi_z - 1); % Maximum possible jump in slow PE direction
 
@@ -52,13 +52,13 @@ max_kz_step = (caipi_z - 1); % Maximum possible jump in slow PE direction
 Nshots = ceil(length(1:caipi_z:(Nz - caipi_z + 1))/Rz); % Number of shots per volume
 
 % Decay parameters
-TE = 30e-3;                         % echo time (s)
-volumeTR = 0.87;                     % temporal frame rate (s)
+TE = 30.3e-3;                         % echo time (s)
+volumeTR = 0.8;                     % temporal frame rate (s)
 TR = volumeTR / Nshots;             % repetition time (s)
 T1 = 1500e-3;                       % T1 (s)
 
 % Number of frames to write in sequence, which is then looped on the scanner
-duration = 87; % experiment duration (s)
+duration = 360; % experiment duration (s)
 Nframes = round(duration/volumeTR);
 
 % Dummy parameters
