@@ -26,11 +26,11 @@ run('./params.m');
 Nvcoils = 10; % Chosen based on visual inspection of the "knee" in SVs
 
 % Filenames
-datdir = '/mnt/storage/rexfung/20250926ball/';
+datdir = '/mnt/storage/rexfung/20251003tap/';
 fn_gre = strcat(datdir, 'exam/gre.h5');
 fn_cal = strcat(datdir, 'exam/cal90.h5');
 fn_epi = strcat(datdir, 'exam/epi6x.h5');
-fn_samp_log = strcat(datdir, 'samp_logs/epi6x.mat');
+fn_samp_log = strcat(datdir, 'samp_logs/samp6x.mat');
 fn_smaps = strcat(datdir, 'recon/smaps.mat');
 
 % Options
@@ -230,6 +230,14 @@ end
 ksp_final = toppe.utils.ift3(img_final);
 
 %% Viz
-interactive4D(abs(flip(permute(img_final, [2 1 3 4]), 1)));
-interactive4D(abs(flip(permute(log(abs(ksp_final) + eps), [2 1 3 4]), 1)));
+interactive4D(abs(img_final));
+interactive4D(log(abs(ksp_final) + eps));
 return;
+
+%% CG-SENSE recon
+rec_cgs = zeros(Nx, Ny, Nz, Nframes);
+
+parfor t = 1:Nframes
+    k_t = ksp_epi_zf(:,:,:,:,t);
+    rec_cgs(:,:,:,t) = bart('pics -l2 -r0.001', k_t, smaps);
+end
