@@ -25,6 +25,10 @@ run('./params.m');
 % Coil compression params
 Nvcoils = 10; % Chosen based on visual inspection of the "knee" in SVs
 
+% Discard frames before steady state
+time2ss = 8;
+NframesDiscard = round(time2ss/volumeTR);
+
 % Filenames
 datdir = '/mnt/storage/rexfung/20250926ball/';
 fn_gre = strcat(datdir, 'exam/gre.h5');
@@ -38,6 +42,9 @@ useOrchestra = true;
 showEPIphaseDiff = true;
 doSENSE = true; % Takes a while
 SENSEmethod = 'pisco';
+
+%% Temporary modifications since I don't have enough memory
+Nframes = 100;
 
 %% Load GRE data
 ksp_gre_raw = orc_read(fn_gre);
@@ -112,6 +119,8 @@ clear ksp_cal_raw;
 
 %% Grid and apply odd/even correction to EPI data
 % Reshape and permute loop data
+ksp_epi = ksp_epi(:,:,2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz)*NframesDiscard+1:end);
+ksp_epi = ksp_epi(:,:,1:2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz)*Nframes);
 ksp_epi = reshape(ksp_epi,Nfid,Nvcoils,2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz),Nframes);
 ksp_epi = permute(ksp_epi,[1 3 2 4]); % [Nfid Ny/Ry*Nz/Rz Nvcoils Nframes]
 
@@ -131,12 +140,22 @@ clear ksp_epi;
 % Phase correct along kx direction
 ksp_loop_cart = hmriutils.epi.epiphasecorrect(ksp_loop_cart, a);
 
-%% Create zero-filled k-space data
-ksp_epi_zf = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
+%% Rebuild sampling mask from 
 load(fn_samp_log);
+samp_log = samp_log(1:Nframes,:,:);
 
 % Replicate samp_log to the number of experiment loops
 samp_log = repmat(samp_log, [Nframes/size(samp_log,1), 1, 1]);
+
+omegas = false(Ny, Nz, Nframes);
+for f = 1:size(samp_log, 1)
+    for k = 1:size(samp_log, 2)
+        omegas(samp_log(f,k,1), samp_log(f,k,2), f) = true;
+    end
+end
+
+%% Create zero-filled k-space data
+ksp_epi_zf = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
 
 % Read through log of sample locations and allocate data
 for frame = 1:Nframes
@@ -158,14 +177,6 @@ clear ksp_loop_cart;
 
 %% Save for next step of recon
 save(strcat(datdir,'recon/ksp.mat'),'ksp_epi_zf','-v7.3');
-
-%% Rebuild sampling mask from samp_log
-omegas = false(Ny, Nz, Nframes);
-for f = 1:size(samp_log, 1)
-    for k = 1:size(samp_log, 2)
-        omegas(samp_log(f,k,1), samp_log(f,k,2), f) = true;
-    end
-end
 
 %% IFFT to get multi-coil images
 imgs_mc = zeros(Nx, Ny, Nz, Nvcoils, Nframes);
@@ -226,10 +237,19 @@ else % root sum of squares combination
     img_final = squeeze(sqrt(sum(abs(imgs_mc).^2, 4)));
 end
 
-%% Compute k-space by IFT3
-ksp_final = toppe.utils.ift3(img_final);
-
 %% Viz
-interactive4D(abs(flip(permute(img_final, [2 1 3 4]), 1)));
-interactive4D(abs(flip(permute(log(abs(ksp_final) + eps), [2 1 3 4]), 1)));
+interactive4D(abs(img_final));
+interactive4D(log(abs(toppe.utils.ift3(img_final)) + eps));
+return;
+
+%% CG-SENSE recon
+rec_cgs = zeros(Nx, Ny, Nz, Nframes);
+
+parfor t = 1:Nframes
+    k_t = ksp_epi_zf(:,:,:,:,t);
+    rec_cgs(:,:,:,t) = bart('pics -l1 -r0.001', k_t, smaps);
+end
+
+interactive4D(abs(rec_cgs));
+interactive4D(log(abs(toppe.utils.ift3(rec_cgs)) + eps));
 return;
