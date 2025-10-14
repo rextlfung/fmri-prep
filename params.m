@@ -35,13 +35,13 @@ dwell = 4e-6; % s
 %% Scan parameters for echo-planar imaging (EPI) sequence
 
 % Spatial parameters
-res = [1.8 1.8 1.8]*1e-3; % resolution (m)
-N = [120 120 80]; % acquisition tensor size
+res = [2.4 2.4 2.4]*1e-3; % resolution (m)
+N = [90 90 60]; % acquisition tensor size
 fov = N .* res; % field of view (m)
 Nx = N(1); Ny = N(2); Nz = N(3);
 
 % Random undersampling parameters. Total acceleration = Ry*Rz*caipi_z
-Ry = sqrt(3); Rz = sqrt(3); % Acceleration/undersampling factors in each direction
+Ry = 1; Rz = 6/4; % Acceleration/undersampling factors in each direction
 caipi_z = 4; % Number of kz locations to acquire per shot. Must be positive integer.
 R = [Ry Rz];
 acs = [0.1 0.1]; % Central portion of ky-kz space to fully sample
@@ -58,11 +58,11 @@ TR = volumeTR / Nshots;             % repetition time (s)
 T1 = 1500e-3;                       % T1 (s)
 
 % Number of frames to write in sequence, which is then looped on the scanner
-duration = 96; % experiment duration (s)
+duration = 360; % experiment duration (s)
 Nframes = round(duration/volumeTR);
 
 % Dummy parameters
-Ndummyframes = round(5*T1/TR); % dummy frames to reach steady state for calibration
+Ndummyframes = round(3*T1/TR); % dummy frames to reach steady state for calibration
 
 % Exciting stuff
 alpha = 180/pi * acos(exp(-TR/T1)); % Ernst angle (degrees)

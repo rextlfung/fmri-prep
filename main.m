@@ -44,7 +44,7 @@ doSENSE = true; % Takes a while
 SENSEmethod = 'pisco';
 
 %% Temporary modifications since I don't have enough memory
-Nframes = 100;
+% Nframes = 100;
 
 %% Load GRE data
 ksp_gre_raw = orc_read(fn_gre);
@@ -120,6 +120,7 @@ clear ksp_cal_raw;
 %% Grid and apply odd/even correction to EPI data
 % Reshape and permute loop data
 ksp_epi = ksp_epi(:,:,2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz)*NframesDiscard+1:end);
+Nframes = Nframes - NframesDiscard;
 ksp_epi = ksp_epi(:,:,1:2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz)*Nframes);
 ksp_epi = reshape(ksp_epi,Nfid,Nvcoils,2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz),Nframes);
 ksp_epi = permute(ksp_epi,[1 3 2 4]); % [Nfid Ny/Ry*Nz/Rz Nvcoils Nframes]
@@ -127,7 +128,7 @@ ksp_epi = permute(ksp_epi,[1 3 2 4]); % [Nfid Ny/Ry*Nz/Rz Nvcoils Nframes]
 % Grid along kx direction via NUFFT (takes a while)
 ksp_loop_cart = zeros([Nx,size(ksp_epi,2:ndims(ksp_epi))]);
 tic
-    for frame = 1:Nframes
+    parfor frame = 1:Nframes
         fprintf('Gridding frame %d\n', round(frame));
         tmp = squeeze(ksp_epi(:,:,:,frame));
         tmp1 = hmriutils.epi.rampsampepi2cart(tmp, kxo, kxe, Nx, fov(1)*100, 'nufft');
@@ -142,7 +143,7 @@ ksp_loop_cart = hmriutils.epi.epiphasecorrect(ksp_loop_cart, a);
 
 %% Rebuild sampling mask from 
 load(fn_samp_log);
-samp_log = samp_log(1:Nframes,:,:);
+samp_log = samp_log(NframesDiscard+(1:Nframes),:,:);
 
 % Replicate samp_log to the number of experiment loops
 samp_log = repmat(samp_log, [Nframes/size(samp_log,1), 1, 1]);
@@ -180,7 +181,7 @@ save(strcat(datdir,'recon/ksp.mat'),'ksp_epi_zf','-v7.3');
 
 %% IFFT to get multi-coil images
 imgs_mc = zeros(Nx, Ny, Nz, Nvcoils, Nframes);
-for frame = 1:Nframes
+parfor frame = 1:Nframes
     imgs_mc(:,:,:,:,frame) = toppe.utils.ift3(ksp_epi_zf(:,:,:,:,frame));
 end
 
@@ -206,7 +207,7 @@ if doSENSE
     smaps = smaps_raw;
     
     % Support mask created from the last eigenvalues of the G matrices 
-    threshold_mask = 0.5;
+    threshold_mask = 0.1;
     eig_mask = zeros(Nx_gre, Ny_gre, Nz_gre);
     eig_mask(find(emaps(:,:,:,end) < threshold_mask)) = 1;    
     smaps = smaps .* eig_mask;
