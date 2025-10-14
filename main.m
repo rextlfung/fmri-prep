@@ -26,7 +26,7 @@ run('./params.m');
 Nvcoils = 10; % Chosen based on visual inspection of the "knee" in SVs
 
 % Discard frames before steady state
-time2ss = 8;
+time2ss = 8; % seconds
 NframesDiscard = round(time2ss/volumeTR);
 
 % Filenames
@@ -178,6 +178,7 @@ clear ksp_loop_cart;
 
 %% Save for next step of recon
 save(strcat(datdir,'recon/ksp.mat'),'ksp_epi_zf','-v7.3');
+return;
 
 %% IFFT to get multi-coil images
 imgs_mc = zeros(Nx, Ny, Nz, Nvcoils, Nframes);
@@ -247,6 +248,7 @@ return;
 rec_cgs = zeros(Nx, Ny, Nz, Nframes);
 
 parfor t = 1:Nframes
+    fprintf('reconstructing frame %d\n', round(frame));
     k_t = ksp_epi_zf(:,:,:,:,t);
     rec_cgs(:,:,:,t) = bart('pics -l1 -r0.001', k_t, smaps);
 end
