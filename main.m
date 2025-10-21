@@ -208,7 +208,7 @@ if doSENSE
     smaps = smaps_raw;
     
     % Support mask created from the last eigenvalues of the G matrices 
-    threshold_mask = 0.1;
+    threshold_mask = 0.5;
     eig_mask = zeros(Nx_gre, Ny_gre, Nz_gre);
     eig_mask(find(emaps(:,:,:,end) < threshold_mask)) = 1;    
     smaps = smaps .* eig_mask;
@@ -247,10 +247,10 @@ return;
 %% CG-SENSE recon
 rec_cgs = zeros(Nx, Ny, Nz, Nframes);
 
-parfor t = 1:Nframes
-    fprintf('reconstructing frame %d\n', round(frame));
+for t = 1:Nframes
+    fprintf('reconstructing frame %d\n', round(t));
     k_t = ksp_epi_zf(:,:,:,:,t);
-    rec_cgs(:,:,:,t) = bart('pics -l1 -r0.001', k_t, smaps);
+    rec_cgs(:,:,:,t) = bart('pics', k_t, smaps);
 end
 
 interactive4D(abs(rec_cgs));
