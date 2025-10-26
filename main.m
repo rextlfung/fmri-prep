@@ -26,15 +26,14 @@ run('./params.m');
 Nvcoils = 10; % Chosen based on visual inspection of the "knee" in SVs
 
 % Discard frames before steady state
-time2ss = 8; % seconds
-NframesDiscard = round(time2ss/volumeTR);
+NframesDiscard = round(discardDuration/volumeTR);
 
 % Filenames
-datdir = '/mnt/storage/rexfung/20251003tap/';
+datdir = '/mnt/storage/rexfung/20251024ball/';
 fn_gre = strcat(datdir, 'exam/gre.h5');
-fn_cal = strcat(datdir, 'exam/cal90.h5');
-fn_epi = strcat(datdir, 'exam/epi6x.h5');
-fn_samp_log = strcat(datdir, 'samp_logs/samp6x.mat');
+fn_cal = strcat(datdir, 'exam/cal108.h5');
+fn_epi = strcat(datdir, 'exam/rand9x.h5');
+fn_samp_log = strcat(datdir, 'samp_logs/rand9x.mat');
 fn_smaps = strcat(datdir, 'recon/smaps.mat');
 
 % Options
@@ -178,12 +177,15 @@ clear ksp_loop_cart;
 
 %% Save for next step of recon
 save(strcat(datdir,'recon/ksp.mat'),'ksp_epi_zf','-v7.3');
-return;
+
+%% Check out the first few frames to quickly see if the data is ok
+testFrames = 10;
+ksp_test = ksp_epi_zf(:,:,:,:,1:testFrames);
 
 %% IFFT to get multi-coil images
-imgs_mc = zeros(Nx, Ny, Nz, Nvcoils, Nframes);
-parfor frame = 1:Nframes
-    imgs_mc(:,:,:,:,frame) = toppe.utils.ift3(ksp_epi_zf(:,:,:,:,frame));
+imgs_mc = zeros(Nx, Ny, Nz, Nvcoils, testFrames);
+parfor frame = 1:testFrames
+    imgs_mc(:,:,:,:,frame) = toppe.utils.ift3(ksp_test(:,:,:,:,frame));
 end
 
 %% Get sensitivity maps with either BART or PISCO
@@ -240,16 +242,16 @@ else % root sum of squares combination
 end
 
 %% Viz
-interactive4D(abs(img_final));
+interactive4D(abs(permute(img_final, [2 3 1 4])));
 interactive4D(log(abs(toppe.utils.ift3(img_final)) + eps));
 return;
 
 %% CG-SENSE recon
-rec_cgs = zeros(Nx, Ny, Nz, Nframes);
+rec_cgs = zeros(Nx, Ny, Nz, testFrames);
 
-for t = 1:Nframes
+for t = 1:testFrames
     fprintf('reconstructing frame %d\n', round(t));
-    k_t = ksp_epi_zf(:,:,:,:,t);
+    k_t = ksp_test(:,:,:,:,t);
     rec_cgs(:,:,:,t) = bart('pics', k_t, smaps);
 end
 
