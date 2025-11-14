@@ -23,30 +23,28 @@ addpath('/home/rexfung/github/hmriutils'); % EPI odd/even correction
 run('./params.m');
 
 % Coil compression params
-Nvcoils = 10; % Chosen based on visual inspection of the "knee" in SVs
+Nvcoils = 18; % Chosen based on visual inspection of the "knee" in SVs
 
 % Discard frames before steady state
 NframesDiscard = round(discardDuration/volumeTR);
 
 % Filenames
-datdir = '/mnt/storage/rexfung/20251024ball/';
-fn_gre = strcat(datdir, 'exam/gre.h5');
-fn_cal = strcat(datdir, 'exam/cal108.h5');
-fn_epi = strcat(datdir, 'exam/rand9x.h5');
-fn_samp_log = strcat(datdir, 'samp_logs/rand9x.mat');
-fn_smaps = strcat(datdir, 'recon/smaps.mat');
+datdir = '/mnt/storage/rexfung/20251106balltap/';
+fn_gre = strcat(datdir, 'tap/gre.h5');
+fn_cal = strcat(datdir, 'tap/cal90.h5');
+fn_epi = strcat(datdir, 'tap/caipi6x.h5');
+fn_samp_log = strcat(datdir, 'samplogs/caipi6x.mat');
+fn_smaps = strcat(datdir, 'tap/recon/smaps_bart.mat');
+fn_recon = strcat(datdir,'tap/recon/caipi6x.mat');
 
 % Options
 useOrchestra = true;
 showEPIphaseDiff = true;
 doSENSE = true; % Takes a while
-SENSEmethod = 'pisco';
-
-%% Temporary modifications since I don't have enough memory
-% Nframes = 100;
+SENSEmethod = 'bart';
 
 %% Load GRE data
-ksp_gre_raw = orc_read(fn_gre);
+ksp_gre_raw = single(orc_read(fn_gre));
 Nfid_gre = size(ksp_gre_raw,1);
 Ncoils = size(ksp_gre_raw,2);
 
@@ -63,9 +61,14 @@ ksp_gre = permute(ksp_gre,[1 3 4 2]); % [Nx Ny Nz Ncoils]
 [ksp_gre, SVs, Vr] = ir_mri_coil_compress(ksp_gre, 'ncoil', Nvcoils);
 
 %% Load EPI data
-ksp_cal_raw = orc_read(fn_cal);
-ksp_epi_raw = orc_read(fn_epi);
+ksp_cal_raw = single(orc_read(fn_cal));
+ksp_epi_raw = single(orc_read(fn_epi));
 Nfid = size(ksp_epi_raw, 1);
+
+if Nfid < size(ksp_cal_raw,1)
+    d = size(ksp_cal_raw,1) - Nfid;
+    ksp_cal_raw = ksp_cal_raw((d/2)+(1:Nfid),:,:);
+end
 
 % Print max real and imag parts to check for reasonable magnitude
 fprintf('Max real part of cal data: %d\n', max(real(ksp_cal_raw(:))))
@@ -83,22 +86,22 @@ clear ksp_epi_raw;
 
 %% Reshape and permute calibration data (a single frame w/out blips)
 ksp_cal = permute(ksp_cal,[1 3 2]); % [Nfid Ny*Nshots Ncoils]
-ksp_cal = ksp_cal(:,1:Ny/2, :, :); % Use the first half of echoes (higher SNR)
+ksp_cal = reshape(ksp_cal, Nfid, 2*round(Ny/Ry/2), [], Nvcoils);
 
 %% Compute odd/even delays using calibration (blipless) data
-% Estimate k-space center offset due to gradient delay using max of each echo
-% train
+% Estimate k-space center offset due to gradient delay
 cal_data = squeeze(abs(mean(ksp_cal, 3)));
-cal_data(:,1:2:end,:,:) = flip(cal_data(:,1:2:end,:,:),1);
+cal_data(:,2:2:end,:,:) = flip(cal_data(:,2:2:end,:,:),1);
 [M, I] = max(cal_data,[],1);
-delay = mean(I,'all') - Nfid/2;
+delay = Nfid/2 + 0.5 - mean(I,'all');
 fprintf('Estimated offset from center of k-space (samples): %f\n', delay);
 
 % retrieve sample locations from .mod file with adc info
 % fn_adc = strcat(datdir, sprintf('adc%d.mod', Nfid));
 % % [rf,gx,gy,gz,desc,paramsint16,pramsfloat,hdr] = toppe.readmod(fn_adc);
 % [kxo, kxe] = toppe.utils.getk(sysGE, fn_adc, Nfid, delay);
-load(strcat(datdir, sprintf('oe_locs/kxoe%d.mat', Nx)),'kxo', 'kxe');
+load(strcat(datdir, sprintf('kxoe/kxoe%d.mat', Nx)),'kxo', 'kxe');
+kxo = kxo((d/2)+(1:Nfid)); kxe = kxe((d/2)+(1:Nfid));
 kxo = kxo/100; kxe = kxe/100; % convert to cycles/cm
 kxo = interp1(1:Nfid, kxo, (1:Nfid) - 0.5 - delay, 'linear', 'extrap');
 kxe = interp1(1:Nfid, kxe, (1:Nfid) - 0.5 - delay, 'linear', 'extrap');
@@ -114,14 +117,12 @@ oephase_data = ifftshift(ifft(fftshift(oephase_data),Nx,1));
 fprintf('Constant phase offset (radians): %f\n', a(1));
 fprintf('Linear term (radians/fov): %f\n', a(2));
 
-clear ksp_cal_raw;
-
 %% Grid and apply odd/even correction to EPI data
 % Reshape and permute loop data
-ksp_epi = ksp_epi(:,:,2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz)*NframesDiscard+1:end);
+ksp_epi = ksp_epi(:,:,2*round(Ny/Ry/2)*round(Nz/caipi_z/Rz)*NframesDiscard+1:end);
 Nframes = Nframes - NframesDiscard;
-ksp_epi = ksp_epi(:,:,1:2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz)*Nframes);
-ksp_epi = reshape(ksp_epi,Nfid,Nvcoils,2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz),Nframes);
+ksp_epi = ksp_epi(:,:,1:2*round(Ny/Ry/2)*round(Nz/caipi_z/Rz)*Nframes);
+ksp_epi = reshape(ksp_epi,Nfid,Nvcoils,2*round(Ny/Ry/2)*round(Nz/caipi_z/Rz),Nframes);
 ksp_epi = permute(ksp_epi,[1 3 2 4]); % [Nfid Ny/Ry*Nz/Rz Nvcoils Nframes]
 
 % Grid along kx direction via NUFFT (takes a while)
@@ -145,7 +146,7 @@ load(fn_samp_log);
 samp_log = samp_log(NframesDiscard+(1:Nframes),:,:);
 
 % Replicate samp_log to the number of experiment loops
-samp_log = repmat(samp_log, [Nframes/size(samp_log,1), 1, 1]);
+% samp_log = repmat(samp_log, [Nframes/size(samp_log,1), 1, 1]);
 
 omegas = false(Ny, Nz, Nframes);
 for f = 1:size(samp_log, 1)
@@ -159,7 +160,7 @@ ksp_epi_zf = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
 
 % Read through log of sample locations and allocate data
 for frame = 1:Nframes
-    for samp_count = 1:2*ceil(Ny/Ry/2)*round(Nz/caipi_z/Rz)
+    for samp_count = 1:size(samp_log,2)
         iy = samp_log(frame,samp_count,1);
         iz = samp_log(frame,samp_count,2);
         if ksp_epi_zf(:,iy,iz,:,frame) ~= 0
@@ -172,25 +173,24 @@ end
 
 clear ksp_loop_cart;
 
-%% NN-interpolation in time (view-sharing)
-% ksp_epi_nn = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
-
 %% Save for next step of recon
-save(strcat(datdir,'recon/ksp.mat'),'ksp_epi_zf','-v7.3');
+save(fn_recon,'ksp_epi_zf','-v7.3');
 
 %% Check out the first few frames to quickly see if the data is ok
-testFrames = 10;
+testFrames = 6;
 ksp_test = ksp_epi_zf(:,:,:,:,1:testFrames);
 
 %% IFFT to get multi-coil images
 imgs_mc = zeros(Nx, Ny, Nz, Nvcoils, testFrames);
-parfor frame = 1:testFrames
+for frame = 1:testFrames
     imgs_mc(:,:,:,:,frame) = toppe.utils.ift3(ksp_test(:,:,:,:,frame));
 end
 
 %% Get sensitivity maps with either BART or PISCO
 if doSENSE
-    if exist(fn_smaps, 'file')
+    if exist('smaps_raw', 'var')
+        return;
+    elseif exist(fn_smaps, 'file')
         load(fn_smaps);
     else
         fprintf('Estimating sensitivity maps from GRE data via %s...\n', SENSEmethod)
@@ -209,8 +209,11 @@ end
 if doSENSE
     smaps = smaps_raw;
     
+    if strcmp(SENSEmethod, 'bart')
+        emaps = 1 - emaps;
+    end
     % Support mask created from the last eigenvalues of the G matrices 
-    threshold_mask = 0.5;
+    threshold_mask = 1;
     eig_mask = zeros(Nx_gre, Ny_gre, Nz_gre);
     eig_mask(find(emaps(:,:,:,end) < threshold_mask)) = 1;    
     smaps = smaps .* eig_mask;
@@ -243,8 +246,7 @@ end
 
 %% Viz
 interactive4D(abs(permute(img_final, [2 3 1 4])));
-interactive4D(log(abs(toppe.utils.ift3(img_final)) + eps));
-return;
+interactive4D(angle(permute(img_final, [2 3 1 4])));
 
 %% CG-SENSE recon
 rec_cgs = zeros(Nx, Ny, Nz, testFrames);
@@ -255,6 +257,7 @@ for t = 1:testFrames
     rec_cgs(:,:,:,t) = bart('pics', k_t, smaps);
 end
 
-interactive4D(abs(rec_cgs));
-interactive4D(log(abs(toppe.utils.ift3(rec_cgs)) + eps));
+%% Viz
+interactive4D(abs(permute(rec_cgs, [2 3 1 4])));
+interactive4D(angle(permute(rec_cgs, [2 3 1 4])));
 return;
