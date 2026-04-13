@@ -29,19 +29,23 @@ Nvcoils = 18; % Chosen based on visual inspection of the "knee" in SVs
 NframesDiscard = round(discardDuration/volumeTR);
 
 % Filenames
-datdir = '/mnt/storage/rexfung/20251106balltap/';
-fn_gre = strcat(datdir, 'tap/gre.h5');
-fn_cal = strcat(datdir, 'tap/cal90.h5');
-fn_epi = strcat(datdir, 'tap/caipi6x.h5');
-fn_samp_log = strcat(datdir, 'samplogs/caipi6x.mat');
-fn_smaps = strcat(datdir, 'tap/recon/smaps_bart.mat');
-fn_recon = strcat(datdir,'tap/recon/caipi6x.mat');
+datdir = '/StorageRAID/rexfung/20260409tap/recon/';
+fn_gre = strcat(datdir, 'gre.h5');
+fn_cal = strcat(datdir, 'pd_cal.h5');
+fn_noise = strcat(datdir, 'pd_noise.h5');
+fn_epi = strcat(datdir, 'pd_epi.h5');
+
+fn_kxoe = strcat(datdir, sprintf('../seqs/pd/kxoe%d.mat', Nx));
+fn_samp_log = strcat(datdir, '../seqs/pd/samp_locs.mat');
+fn_smaps = strcat(datdir, 'smaps.mat');
+fn_recon = strcat(datdir,'pd_epi_zf.mat');
 
 % Options
 useOrchestra = true;
 showEPIphaseDiff = true;
 doSENSE = true; % Takes a while
-SENSEmethod = 'bart';
+SENSEmethod = 'pisco';
+fn_smaps = strcat(fn_smaps(1:end-4), '_', SENSEmethod, '.mat');
 
 %% Load GRE data
 ksp_gre_raw = single(orc_read(fn_gre));
@@ -59,6 +63,7 @@ ksp_gre = permute(ksp_gre,[1 3 4 2]); % [Nx Ny Nz Ncoils]
 
 %% Coil-compress data via PCA
 [ksp_gre, SVs, Vr] = ir_mri_coil_compress(ksp_gre, 'ncoil', Nvcoils);
+save(strcat(fn_gre(1:end-3), '.mat'), 'ksp_gre', '-v7.3');
 
 %% Load EPI data
 ksp_cal_raw = single(orc_read(fn_cal));
@@ -68,6 +73,8 @@ Nfid = size(ksp_epi_raw, 1);
 if Nfid < size(ksp_cal_raw,1)
     d = size(ksp_cal_raw,1) - Nfid;
     ksp_cal_raw = ksp_cal_raw((d/2)+(1:Nfid),:,:);
+else
+    d = 0;
 end
 
 % Print max real and imag parts to check for reasonable magnitude
@@ -85,22 +92,23 @@ ksp_epi = permute(reshape(ksp_epi, Nfid, [], Nvcoils), [1 3 2]);
 clear ksp_epi_raw;
 
 %% Reshape and permute calibration data (a single frame w/out blips)
-ksp_cal = permute(ksp_cal,[1 3 2]); % [Nfid Ny*Nshots Ncoils]
-ksp_cal = reshape(ksp_cal, Nfid, 2*round(Ny/Ry/2), [], Nvcoils);
+ksp_cal = permute(ksp_cal,[1 3 2]); % [Nfid ETL*Nshots Ncoils]
+ksp_cal = reshape(ksp_cal, Nfid, ETL, [], Nvcoils);
 
 %% Compute odd/even delays using calibration (blipless) data
 % Estimate k-space center offset due to gradient delay
-cal_data = squeeze(abs(mean(ksp_cal, 3)));
-cal_data(:,2:2:end,:,:) = flip(cal_data(:,2:2:end,:,:),1);
-[M, I] = max(cal_data,[],1);
-delay = Nfid/2 + 0.5 - mean(I,'all');
+% cal_data = squeeze(abs(mean(ksp_cal, 3)));
+% cal_data(:,2:2:end,:,:) = flip(cal_data(:,2:2:end,:,:),1);
+% [M, I] = max(cal_data,[],1);
+% delay = Nfid/2 + 0.5 - mean(I,'all');
+delay = -1;
 fprintf('Estimated offset from center of k-space (samples): %f\n', delay);
 
 % retrieve sample locations from .mod file with adc info
 % fn_adc = strcat(datdir, sprintf('adc%d.mod', Nfid));
 % % [rf,gx,gy,gz,desc,paramsint16,pramsfloat,hdr] = toppe.readmod(fn_adc);
 % [kxo, kxe] = toppe.utils.getk(sysGE, fn_adc, Nfid, delay);
-load(strcat(datdir, sprintf('kxoe/kxoe%d.mat', Nx)),'kxo', 'kxe');
+load(fn_kxoe,'kxo', 'kxe');
 kxo = kxo((d/2)+(1:Nfid)); kxe = kxe((d/2)+(1:Nfid));
 kxo = kxo/100; kxe = kxe/100; % convert to cycles/cm
 kxo = interp1(1:Nfid, kxo, (1:Nfid) - 0.5 - delay, 'linear', 'extrap');
@@ -119,20 +127,20 @@ fprintf('Linear term (radians/fov): %f\n', a(2));
 
 %% Grid and apply odd/even correction to EPI data
 % Reshape and permute loop data
-ksp_epi = ksp_epi(:,:,2*round(Ny/Ry/2)*round(Nz/caipi_z/Rz)*NframesDiscard+1:end);
-Nframes = Nframes - NframesDiscard;
-ksp_epi = ksp_epi(:,:,1:2*round(Ny/Ry/2)*round(Nz/caipi_z/Rz)*Nframes);
-ksp_epi = reshape(ksp_epi,Nfid,Nvcoils,2*round(Ny/Ry/2)*round(Nz/caipi_z/Rz),Nframes);
-ksp_epi = permute(ksp_epi,[1 3 2 4]); % [Nfid Ny/Ry*Nz/Rz Nvcoils Nframes]
+% ksp_epi = ksp_epi(:,:,ETL*Nshots*NframesDiscard+1:end);
+% Nframes = Nframes - NframesDiscard;
+ksp_epi = ksp_epi(:,:,1:ETL*Nshots*Nframes);
+ksp_epi = reshape(ksp_epi,Nfid,Nvcoils,ETL,Nshots,Nframes);
+ksp_epi = permute(ksp_epi,[1 3 4 2 5]); % [Nfid ETL Nshots Nvcoils Nframes]
 
 % Grid along kx direction via NUFFT (takes a while)
 ksp_loop_cart = zeros([Nx,size(ksp_epi,2:ndims(ksp_epi))]);
 tic
     parfor frame = 1:Nframes
         fprintf('Gridding frame %d\n', round(frame));
-        tmp = squeeze(ksp_epi(:,:,:,frame));
+        tmp = squeeze(ksp_epi(:,:,:,:,frame));
         tmp1 = hmriutils.epi.rampsampepi2cart(tmp, kxo, kxe, Nx, fov(1)*100, 'nufft');
-        ksp_loop_cart(:,:,:,frame) = tmp1;
+        ksp_loop_cart(:,:,:,:,frame) = tmp1;
     end
 toc
 
@@ -142,16 +150,17 @@ clear ksp_epi;
 ksp_loop_cart = hmriutils.epi.epiphasecorrect(ksp_loop_cart, a);
 
 %% Rebuild sampling mask from 
-load(fn_samp_log);
-samp_log = samp_log(NframesDiscard+(1:Nframes),:,:);
-
-% Replicate samp_log to the number of experiment loops
-% samp_log = repmat(samp_log, [Nframes/size(samp_log,1), 1, 1]);
+load(fn_samp_log); % parts and schedules
+[Nframes, Nshots, ETL, ~] = size(schedules);
 
 omegas = false(Ny, Nz, Nframes);
-for f = 1:size(samp_log, 1)
-    for k = 1:size(samp_log, 2)
-        omegas(samp_log(f,k,1), samp_log(f,k,2), f) = true;
+for frame = 1:Nframes
+    for shot = 1:Nshots
+        for echo = 1:ETL
+            omegas(schedules(frame,shot,echo,1)...
+                , schedules(frame,shot,echo,2)...
+                , frame) = true;
+        end
     end
 end
 
@@ -160,14 +169,16 @@ ksp_epi_zf = zeros(Nx,Ny,Nz,Nvcoils,Nframes);
 
 % Read through log of sample locations and allocate data
 for frame = 1:Nframes
-    for samp_count = 1:size(samp_log,2)
-        iy = samp_log(frame,samp_count,1);
-        iz = samp_log(frame,samp_count,2);
-        if ksp_epi_zf(:,iy,iz,:,frame) ~= 0
-            fprintf('Warning: attempting to overwrite frame %d, ky %d, kz %d', frame, iy, iz);
-            pause;
+    for shot = 1:Nshots
+        for echo = 1:ETL
+            iy = schedules(frame,shot,echo,1);
+            iz = schedules(frame,shot,echo,2);
+            if ksp_epi_zf(:,iy,iz,:,frame) ~= 0
+                fprintf('Warning: attempting to overwrite frame %d, ky %d, kz %d', frame, iy, iz);
+                pause;
+            end
+            ksp_epi_zf(:,iy,iz,:,frame) = ksp_loop_cart(:,echo,shot,:,frame);
         end
-        ksp_epi_zf(:,iy,iz,:,frame) = ksp_loop_cart(:,samp_count,:,frame);
     end
 end
 
@@ -176,9 +187,9 @@ clear ksp_loop_cart;
 %% Save for next step of recon
 save(fn_recon,'ksp_epi_zf','-v7.3');
 
-%% Check out the first few frames to quickly see if the data is ok
+%% Check out a few frames to quickly see if the data is ok
 testFrames = 6;
-ksp_test = ksp_epi_zf(:,:,:,:,1:testFrames);
+ksp_test = ksp_epi_zf(:,:,:,:,NframesDiscard+(1:testFrames));
 
 %% IFFT to get multi-coil images
 imgs_mc = zeros(Nx, Ny, Nz, Nvcoils, testFrames);

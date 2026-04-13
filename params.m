@@ -10,8 +10,8 @@ psd_rf_wait = 200e-6; % s
 % Here we extend rfRingdownTime by psd_rf_wait to ensure that the subsequent 
 % wait pulse (delay block) doesn't overlap with the 'true' RF ringdown time
 % (54 us).
-sys = mr.opts('maxGrad', 40, 'gradUnit','mT/m', ...
-              'maxSlew', 120, 'slewUnit', 'T/m/s', ...
+sys = mr.opts('maxGrad', 50, 'gradUnit','mT/m', ...
+              'maxSlew', 160, 'slewUnit', 'T/m/s', ...
               'rfDeadTime', 100e-6, ...
               'rfRingdownTime', 60e-6 + psd_rf_wait, ...
               'adcDeadTime', 20e-6, ...
@@ -40,26 +40,20 @@ N = [90 90 60]; % acquisition tensor size
 fov = N .* res; % field of view (m)
 Nx = N(1); Ny = N(2); Nz = N(3);
 
-% Random undersampling parameters. Total acceleration = Ry*Rz*caipi_z
-Ry = 1; Rz = 3; % Acceleration/undersampling factors in each direction
-caipi_z = 2; % Number of kz locations to acquire per shot. Must be positive integer.
-R = [Ry Rz];
-acs = [0.0 0.0]; % Central portion of ky-kz space to fully sample
-max_ky_step = round(Ny/16); % Maximum gap in fast PE direction
-max_kz_step = (caipi_z - 1); % Maximum possible jump in slow PE direction
-
-% Temporal parameters
-Nshots = ceil(length(1:caipi_z:(Nz - caipi_z + 1))/Rz); % Number of shots per volume
+% Acceleration parameters
+R = 6;
+ETL = 75;
+Nshots = ceil(Ny*Nz/R/ETL);
 
 % Decay parameters
-TE = 30.3e-3; % echo time (s)
+TE = 30e-3; % echo time (s)
 volumeTR = 0.8; % temporal frame rate (s)
 TR = volumeTR / Nshots; % repetition time (s)
 T1 = 1.3; % T1 (s)
 
 % Number of frames to write in sequence, which is then looped on the scanner
-duration = 240; % experiment duration (s)
-discardDuration = 10; % instructional duration to be discarded (s)
+duration = 300; % experiment duration (s)
+discardDuration = 9.6; % instructional duration to be discarded (s)
 Nframes = round((duration + discardDuration)/volumeTR);
 
 % Dummy parameters
@@ -70,7 +64,7 @@ alpha = 180/pi * acos(exp(-TR/T1)); % Ernst angle (degrees)
 rfDur = 2e-3;                       % RF pulse duration (s)
 rfTB  = 6;                          % RF pulse time-bandwidth product
 rf_phase_0 = 117;                   % RF spoiling initial phase (degrees)
-NcyclesSpoil = 2;                   % number of Gx and Gz spoiler cycles
+NcyclesSpoil = 2;                 % number of gradient spoiler cycles
 
 % Fat saturation
 fatChemShift = 3.5*1e-6;                        % 3.5 ppm
@@ -92,9 +86,9 @@ Nx_gre = N_gre(1); Ny_gre = N_gre(2); Nz_gre = N_gre(3);
 NdummyZloops = 4; % number of dummy excitations to reach steady state
 
 % Other acquisition params
-TE_gre = 1/fatOffresFreq + 2e-4; % fat and water in phase for both echoes
+TE_gre = 1/fatOffresFreq + 8e-4; % fat and water in phase for both echoes
 TR_gre = 6e-3; % constant TR
-T1_gre = 1500e-3; % approximate T1
+T1_gre = 1.3; % approximate T1
 alpha_gre = 180/pi*acos(exp(-TR_gre/T1_gre)); % flip angle (degrees)
 
 % Sequence parameters
