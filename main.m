@@ -44,38 +44,40 @@ fn_recon = strcat(datdir,'pd_epi_zf.mat');
 useOrchestra = true;
 showEPIphaseDiff = true;
 doSENSE = true; % Takes a while
-SENSEmethod = 'pisco';
+SENSEmethod = 'bart';
 fn_smaps = strcat(fn_smaps(1:end-4), '_', SENSEmethod, '.mat');
+
+%% Load noise data
+ksp_noise = single(orc_read(fn_noise));
+[Nfid, Ncoils, ~] = size(ksp_noise);
+ksp_noise = permute(ksp_noise, [1 3 2]);
+ksp_noise = reshape(ksp_noise, [], 1, 1, Ncoils);
 
 %% Load GRE data
 ksp_gre_raw = single(orc_read(fn_gre));
-Nfid_gre = size(ksp_gre_raw,1);
-Ncoils = size(ksp_gre_raw,2);
 
 % Check for reasonable magnitude
 fprintf('Max real part of gre data: %d\n', max(real(ksp_gre_raw(:))))
 fprintf('Max imag part of gre data: %d\n', max(imag(ksp_gre_raw(:))))
 
 % Reshape and permute gre data
+Nfid_gre = size(ksp_gre_raw,1);
 ksp_gre = ksp_gre_raw(:,:,Nfid_gre+1:end); % discard blipless cal data
 ksp_gre = reshape(ksp_gre,Nx_gre,Ncoils,Ny_gre,Nz_gre);
 ksp_gre = permute(ksp_gre,[1 3 4 2]); % [Nx Ny Nz Ncoils]
 
-%% Coil-compress data via PCA
+% Whiten using noise scan
+ksp_gre = bart('whiten -n', ksp_gre, ksp_noise);
+
+% Coil-compress data via PCA
 [ksp_gre, SVs, Vr] = ir_mri_coil_compress(ksp_gre, 'ncoil', Nvcoils);
 save(strcat(fn_gre(1:end-3), '.mat'), 'ksp_gre', '-v7.3');
 
 %% Load EPI data
 ksp_cal_raw = single(orc_read(fn_cal));
+assert(Nfid == size(ksp_cal_raw,1));
 ksp_epi_raw = single(orc_read(fn_epi));
-Nfid = size(ksp_epi_raw, 1);
-
-if Nfid < size(ksp_cal_raw,1)
-    d = size(ksp_cal_raw,1) - Nfid;
-    ksp_cal_raw = ksp_cal_raw((d/2)+(1:Nfid),:,:);
-else
-    d = 0;
-end
+assert(Nfid == size(ksp_epi_raw, 1));
 
 % Print max real and imag parts to check for reasonable magnitude
 fprintf('Max real part of cal data: %d\n', max(real(ksp_cal_raw(:))))
@@ -83,13 +85,23 @@ fprintf('Max imag part of cal data: %d\n', max(imag(ksp_cal_raw(:))))
 fprintf('Max real part of epi data: %d\n', max(real(ksp_epi_raw(:))))
 fprintf('Max imag part of epi data: %d\n', max(imag(ksp_epi_raw(:))))
 
-%% Coil-compress using compression matrix Vr
-ksp_cal = reshape(permute(ksp_cal_raw, [1 3 2]), [], Ncoils) * Vr;
-ksp_cal = permute(reshape(ksp_cal, Nfid, [], Nvcoils), [1 3 2]);
-ksp_epi = reshape(permute(ksp_epi_raw, [1 3 2]), [], Ncoils) * Vr;
-ksp_epi = permute(reshape(ksp_epi, Nfid, [], Nvcoils), [1 3 2]);
+%% Reshape, whiten, squeeze
+ksp_cal = reshape(permute(ksp_cal_raw, [1 3 2]), Nfid, [], 1, Ncoils);
+ksp_epi = reshape(permute(ksp_epi_raw, [1 3 2]), Nfid, [], 1, Ncoils);
+
+ksp_cal = bart('whiten -n', ksp_cal, ksp_noise);
+ksp_epi = bart('whiten -n', ksp_epi, ksp_noise);
+
+ksp_cal = squeeze(ksp_cal);
+ksp_epi = squeeze(ksp_epi);
 
 clear ksp_epi_raw;
+
+%% Coil-compress using compression matrix Vr
+ksp_cal = reshape(ksp_cal, [], Ncoils) * Vr;
+ksp_cal = permute(reshape(ksp_cal, Nfid, [], Nvcoils), [1 3 2]);
+ksp_epi = reshape(ksp_epi, [], Ncoils) * Vr;
+ksp_epi = permute(reshape(ksp_epi, Nfid, [], Nvcoils), [1 3 2]);
 
 %% Reshape and permute calibration data (a single frame w/out blips)
 ksp_cal = permute(ksp_cal,[1 3 2]); % [Nfid ETL*Nshots Ncoils]
@@ -109,7 +121,6 @@ fprintf('Estimated offset from center of k-space (samples): %f\n', delay);
 % % [rf,gx,gy,gz,desc,paramsint16,pramsfloat,hdr] = toppe.readmod(fn_adc);
 % [kxo, kxe] = toppe.utils.getk(sysGE, fn_adc, Nfid, delay);
 load(fn_kxoe,'kxo', 'kxe');
-kxo = kxo((d/2)+(1:Nfid)); kxe = kxe((d/2)+(1:Nfid));
 kxo = kxo/100; kxe = kxe/100; % convert to cycles/cm
 kxo = interp1(1:Nfid, kxo, (1:Nfid) - 0.5 - delay, 'linear', 'extrap');
 kxe = interp1(1:Nfid, kxe, (1:Nfid) - 0.5 - delay, 'linear', 'extrap');
@@ -199,9 +210,7 @@ end
 
 %% Get sensitivity maps with either BART or PISCO
 if doSENSE
-    if exist('smaps_raw', 'var')
-        return;
-    elseif exist(fn_smaps, 'file')
+    if exist(fn_smaps, 'file')
         load(fn_smaps);
     else
         fprintf('Estimating sensitivity maps from GRE data via %s...\n', SENSEmethod)
