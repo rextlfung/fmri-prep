@@ -1,20 +1,20 @@
 %% CG-SENSE recon with BART
 % Load data
-datdir = '/mnt/storage/rexfung/20260317tap/recon/';
-fn_epi = strcat(datdir, 'pd_epi_zf.mat');
+datdir = '/mnt/storage/rexfung/20260409tap/recon/';
+fn_epi = strcat(datdir, 'caipi_epi_zf.mat');
 fn_gre = strcat(datdir, 'gre.mat');
-SENSEmethod = 'pisco';
+SENSEmethod = 'bart';
 fn_smaps = strcat(datdir, 'smaps_', SENSEmethod, '.mat');
-fn_recon = strcat(fn_epi(1:end-11), '_recon_cgs.nii');
+lamb = 0.0;
+bart_cmd = sprintf('pics -l1 -r%f -e', lamb);
+fn_recon = strcat(fn_epi(1:end-11), sprintf('_recon_cgs_l1_r%f.nii', lamb));
 
 kdata = matfile(fn_epi); % ksp_zf
 
 run('./params.m'); Nvcoils = 18;
 
 %% Get sensitivity maps with either BART or PISCO
-if exist('smaps_raw', 'var')
-    return;
-elseif exist(fn_smaps, 'file')
+if exist(fn_smaps, 'file')
     load(fn_smaps); % smaps
 else
     load(fn_gre);
@@ -57,10 +57,10 @@ smaps = smaps_new; clear smaps_new;
 %% Recon with CG-SENSE
 tic;
 img = zeros(Nx,Ny,Nz,Nframes);
-for frame = 1:Nframes
+parfor frame = 1:Nframes
     fprintf('Reconstructing frame %d\n', round(frame));
     data = squeeze(kdata.ksp_epi_zf(:,:,:,:,frame));
-    img(:,:,:,frame) = bart('pics', data, smaps);
+    img(:,:,:,frame) = bart(bart_cmd, data, smaps);
 end
 toc;
 
